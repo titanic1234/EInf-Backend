@@ -1,0 +1,23 @@
+# Test your FastAPI endpoints
+
+GET http://127.0.0.1:8000/
+Accept: application/json
+
+###
+
+GET http://127.0.0.1:8000/hello/test
+Accept: application/json
+
+###
+
+
+POST http://127.0.0.1:8000/games/join
+Accept: application/json
+Content-Type: application/json
+
+{
+  "name": "client1",
+  "code": "S0PGP3"
+}
+
+###

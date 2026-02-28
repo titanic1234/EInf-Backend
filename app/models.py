@@ -8,7 +8,7 @@ BOARD_SIZE = 12
 @dataclass
 class PlayerState:
     token: str
-    name: str
+    name: str | None = None
     ships: list[list[tuple[int, int]]] = field(default_factory=list)
     shots_received: set[tuple[int, int]] = field(default_factory=set)
     ready: bool = False

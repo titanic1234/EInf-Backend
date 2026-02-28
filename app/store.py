@@ -17,12 +17,12 @@ def generate_token() -> str:
     return secrets.token_urlsafe(24)
 
 
-def create_room(player_name: str) -> tuple[GameRoom, str]:
+def create_room() -> tuple[GameRoom, str]:
     code = generate_code()
     token = generate_token()
     room = GameRoom(
         code=code,
-        host=PlayerState(token=token, name=player_name),
+        host=PlayerState(token=token),
     )
     games[code] = room
     return room, token

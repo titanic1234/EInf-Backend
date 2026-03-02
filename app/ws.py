@@ -140,6 +140,7 @@ async def handle_websocket(websocket: WebSocket, code: str, token: str):
         return
 
     role = get_player_role(room, token)
+
     if not role:
         await websocket.close(code=4001)
         return
@@ -164,6 +165,9 @@ async def handle_websocket(websocket: WebSocket, code: str, token: str):
         while True:
             data = await websocket.receive_json()
             msg_type = data.get("type")
+
+            if msg_type == "host_name":
+                room.host.name = data.get("name")
 
             # set_board
             if msg_type == "set_board":

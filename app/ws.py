@@ -1,14 +1,13 @@
 from collections import defaultdict
 from typing import Any, Dict, List, Set, Tuple
 from fastapi import WebSocket, WebSocketDisconnect
+import random
 
 from app.store import games, get_player_role
 
-# !!! ANPASSEN: Dein Client-Board ist 12x12 (A-L, 1-12)
-GRID_SIZE = 12
-
 connections: dict[str, dict[str, WebSocket]] = defaultdict(dict)
 
+GRID_SIZE = 12
 Coord = Tuple[int, int]  # (row, col)
 
 
@@ -24,6 +23,11 @@ def _ensure_room_mp_state(room) -> None:
         room.phase = "lobby"
     if not hasattr(room, "turn"):
         room.turn = "host"
+
+    # NEW: aktive Feuer (Napalm)
+    if not hasattr(room, "fires"):
+        # Liste von Fire-Objekten (dict)
+        room.fires = []  # type: ignore[attr-defined]
 
 
 def _other_role(role: str) -> str:
@@ -133,6 +137,103 @@ def _ability_targets(ability: str, row: int, col: int) -> List[Coord]:
     return [(row, col)]
 
 
+def _neighbors4(cell: Coord) -> List[Coord]:
+    r, c = cell
+    cand = [(r - 1, c), (r + 1, c), (r, c - 1), (r, c + 1)]
+    return [x for x in cand if _in_bounds(x)]
+
+
+async def _tick_all_fires(room, code: str) -> None:
+    """
+    Führt 1 Tick für alle aktiven Feuer aus.
+    Jede Fire hat:
+      {
+        "target_role": "host"/"guest",
+        "turns_left": int,
+        "burning_cells": set((r,c)),
+        "expanded_to": set((r,c))
+      }
+    """
+    if not getattr(room, "fires", None):
+        return
+
+    # Wir sammeln alle Ergebnisse in einem Broadcast pro Tick, damit Client es anzeigen kann
+    tick_results = []
+
+    # Es können während eines Ticks neue shots passieren -> game over möglich
+    game_over_winner = None
+
+    for fire in list(room.fires):  # type: ignore[attr-defined]
+        if fire["turns_left"] <= 0:
+            continue
+
+        target_role = fire["target_role"]
+        target_board = room.boards.get(target_role)  # type: ignore[attr-defined]
+        if not target_board:
+            fire["turns_left"] = 0
+            continue
+
+        candidates: Set[Coord] = set()
+        for (r, c) in fire["burning_cells"]:
+            for nb in _neighbors4((r, c)):
+                if nb in fire["expanded_to"]:
+                    continue
+                # wenn schon geschossen, bringt's visuell nix -> optional skip
+                if nb in target_board["shots"]:
+                    fire["expanded_to"].add(nb)
+                    continue
+                candidates.add(nb)
+
+        # bis zu 3 neue Zellen pro Tick
+        cand_list = list(candidates)
+        random.shuffle(cand_list)
+        spread_targets = cand_list[:3]
+
+        new_burning = set()
+        any_destroyed_cells = []
+
+        for cell in spread_targets:
+            fire["expanded_to"].add(cell)
+            new_burning.add(cell)
+
+            res = _apply_shot_to_board(target_board, cell)
+            if not res["ok"]:
+                continue
+
+            destroyed_cells = res["destroyed_cells"]
+            if destroyed_cells:
+                any_destroyed_cells.extend(destroyed_cells)
+
+            tick_results.append({
+                "target_role": target_role,
+                "row": cell[0],
+                "col": cell[1],
+                "hit": bool(res["hit"]),
+                "destroyed": bool(res["destroyed"]),
+                "destroyed_cells": destroyed_cells,
+            })
+
+        fire["burning_cells"] |= new_burning
+        fire["turns_left"] -= 1
+
+        if _all_ships_destroyed(target_board):
+            # Das Feuer hat das Spiel beendet -> Gewinner ist der ANDERE als target_role
+            game_over_winner = _other_role(target_role)
+
+    # Feuer entfernen, die fertig sind
+    room.fires = [f for f in room.fires if f["turns_left"] > 0]  # type: ignore[attr-defined]
+
+    if tick_results:
+        await broadcast(code, {
+            "type": "fire_tick",
+            "results": tick_results,
+        })
+
+    if game_over_winner:
+        room.phase = "finished"
+        await broadcast(code, {"type": "game_over", "winner": game_over_winner})
+
+
 async def handle_websocket(websocket: WebSocket, code: str, token: str):
     room = games.get(code)
     if not room:
@@ -140,7 +241,6 @@ async def handle_websocket(websocket: WebSocket, code: str, token: str):
         return
 
     role = get_player_role(room, token)
-
     if not role:
         await websocket.close(code=4001)
         return
@@ -154,8 +254,8 @@ async def handle_websocket(websocket: WebSocket, code: str, token: str):
         "type": "presence",
         "host_connected": "host" in connections[code],
         "guest_connected": "guest" in connections[code],
-        "host_name": room.host.name if room.host else "",
-        "guest_name": room.guest.name if room.guest else "",
+        "host_name": (room.host.name or "") if room.host else "",
+        "guest_name": (room.guest.name or "") if room.guest else "",
         "host_board_set": bool(getattr(room, "boards", {}).get("host")),
         "guest_board_set": bool(getattr(room, "boards", {}).get("guest")),
         "grid_size": GRID_SIZE,
@@ -165,9 +265,6 @@ async def handle_websocket(websocket: WebSocket, code: str, token: str):
         while True:
             data = await websocket.receive_json()
             msg_type = data.get("type")
-
-            if msg_type == "host_name":
-                room.host.name = data.get("name")
 
             # set_board
             if msg_type == "set_board":
@@ -197,8 +294,8 @@ async def handle_websocket(websocket: WebSocket, code: str, token: str):
                     "type": "ready_update",
                     "host_ready": room.host.ready,
                     "guest_ready": room.guest.ready if room.guest else False,
-                    "host_name": room.host.name if room.host else "",
-                    "guest_name": room.guest.name if room.guest else "",
+                    "host_name": (room.host.name or "") if room.host else "",
+                    "guest_name": (room.guest.name or "") if room.guest else "",
                 })
 
                 host_set = bool(getattr(room, "boards", {}).get("host"))
@@ -240,7 +337,7 @@ async def handle_websocket(websocket: WebSocket, code: str, token: str):
                 destroyed = bool(res["destroyed"])
                 destroyed_cells = res["destroyed_cells"]
 
-                # Turn nur bei MISS wechseln
+                # Turn nur bei MISS wechseln (deine Änderung)
                 if not hit:
                     room.turn = _other_role(role)
 
@@ -258,6 +355,10 @@ async def handle_websocket(websocket: WebSocket, code: str, token: str):
                 if _all_ships_destroyed(target_board):
                     room.phase = "finished"
                     await broadcast(code, {"type": "game_over", "winner": role})
+                    continue
+
+                # Nach jeder Aktion: 1 Feuer-Tick
+                await _tick_all_fires(room, code)
                 continue
 
             # ability
@@ -296,6 +397,7 @@ async def handle_websocket(websocket: WebSocket, code: str, token: str):
                         continue
                     targets = [c for c in _ability_targets(ability, y, x) if _in_bounds(c)]
 
+                # sonar = scan only
                 if ability == "sonar":
                     found = []
                     for (r, c) in targets:
@@ -312,8 +414,61 @@ async def handle_websocket(websocket: WebSocket, code: str, token: str):
                     # Sonar kostet Zug
                     room.turn = _other_role(role)
                     await broadcast(code, {"type": "turn_update", "turn": room.turn})
+
+                    # Nach jeder Aktion: 1 Feuer-Tick
+                    await _tick_all_fires(room, code)
                     continue
 
+                # napalm: 1 shot + Fire anlegen
+                if ability == "napalm":
+                    # napalm zielt auf genau eine Zelle
+                    (nr, nc) = targets[0]
+                    res0 = _apply_shot_to_board(target_board, (nr, nc))
+                    if not res0["ok"]:
+                        await websocket.send_json({"type": "error", "detail": res0["error"]})
+                        continue
+
+                    hit0 = bool(res0["hit"])
+                    destroyed0 = bool(res0["destroyed"])
+                    destroyed_cells0 = res0["destroyed_cells"]
+
+                    # Feuer erzeugen: brennt auf Gegnerboard 3 Ticks weiter
+                    room.fires.append({
+                        "target_role": target_role,
+                        "turns_left": 3,
+                        "burning_cells": {(nr, nc)},
+                        "expanded_to": {(nr, nc)},
+                    })  # type: ignore[attr-defined]
+
+                    # Napalm kostet immer Zug (typisch Special). Wenn du anders willst: nach hit0 switchen.
+                    room.turn = _other_role(role)
+
+                    await broadcast(code, {
+                        "type": "ability_result",
+                        "by": role,
+                        "ability": "napalm",
+                        "results": [{
+                            "row": nr,
+                            "col": nc,
+                            "hit": hit0,
+                            "destroyed": destroyed0,
+                            "destroyed_cells": destroyed_cells0,
+                        }],
+                        "next_turn": room.turn,
+                        "fire_started": True,
+                        "fire_origin": {"row": nr, "col": nc, "target_role": target_role},
+                    })
+
+                    if _all_ships_destroyed(target_board):
+                        room.phase = "finished"
+                        await broadcast(code, {"type": "game_over", "winner": role})
+                        continue
+
+                    # Nach jeder Aktion: 1 Feuer-Tick
+                    await _tick_all_fires(room, code)
+                    continue
+
+                # airstrike / guided: multiple shots
                 results = []
                 any_hit = False
                 all_destroyed_cells: List[List[int]] = []
@@ -338,7 +493,7 @@ async def handle_websocket(websocket: WebSocket, code: str, token: str):
                         "destroyed_cells": destroyed_cells,
                     })
 
-                # Turn: nur bei "kein Hit" wechseln
+                # Turn: nur bei "kein Hit" wechseln (deine Regel)
                 if not any_hit:
                     room.turn = _other_role(role)
 
@@ -356,6 +511,10 @@ async def handle_websocket(websocket: WebSocket, code: str, token: str):
                 if _all_ships_destroyed(target_board):
                     room.phase = "finished"
                     await broadcast(code, {"type": "game_over", "winner": role})
+                    continue
+
+                # Nach jeder Aktion: 1 Feuer-Tick
+                await _tick_all_fires(room, code)
                 continue
 
             await websocket.send_json({"type": "error", "detail": f"Unknown message type: {msg_type}"})

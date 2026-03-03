@@ -1,4 +1,7 @@
+# app/ws_routing/state.py
+
 from app.ws_routing.types import GRID_SIZE, Coord
+
 
 def _ensure_room_mp_state(room) -> None:
     if not hasattr(room, "boards"):
@@ -7,17 +10,12 @@ def _ensure_room_mp_state(room) -> None:
         room.phase = "lobby"
     if not hasattr(room, "turn"):
         room.turn = "host"
-
-    # NEW: aktive Feuer (Napalm)
     if not hasattr(room, "fires"):
-        # Liste von Fire-Objekten (dict)
         room.fires = []  # type: ignore[attr-defined]
-
 
 
 def _other_role(role: str) -> str:
     return "guest" if role == "host" else "host"
-
 
 
 def _in_bounds(cell: Coord) -> bool:

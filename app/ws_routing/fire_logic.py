@@ -1,9 +1,14 @@
-from typing import List, Set
+# app/ws_routing/fire_logic.py
+
+from typing import List, Set, Optional, Callable, Awaitable, Any, Dict
 import random
 
 from app.ws_routing.types import Coord
 from app.ws_routing.state import _in_bounds, _other_role
-from app.ws_routing.board_logic import _apply_shot_to_board, _all_ships_destroyed
+from app.ws_routing.board_logic import _apply_napalm_shot_rules, _all_ships_destroyed
+
+
+BroadcastFn = Callable[[Dict[str, Any]], Awaitable[None]]
 
 
 def _neighbors4(cell: Coord) -> List[Coord]:
@@ -12,27 +17,15 @@ def _neighbors4(cell: Coord) -> List[Coord]:
     return [x for x in cand if _in_bounds(x)]
 
 
-
-async def _tick_all_fires(room, code: str, broadcast) -> None:
-    """
-    Führt 1 Tick für alle aktiven Feuer aus.
-    Jede Fire hat:
-      {
-        "target_role": "host"/"guest",
-        "turns_left": int,
-        "burning_cells": set((r,c)),
-        "expanded_to": set((r,c))
-      }
-    """
+async def _tick_all_fires(room, code: str, broadcast: BroadcastFn) -> None:
     if not getattr(room, "fires", None):
         return
 
     tick_results = []
-
-    game_over_winner = None
+    game_over_winner: Optional[str] = None
 
     for fire in list(room.fires):  # type: ignore[attr-defined]
-        if fire["turns_left"] <= 0:
+        if fire.get("turns_left", 0) <= 0:
             continue
 
         target_role = fire["target_role"]
@@ -46,30 +39,27 @@ async def _tick_all_fires(room, code: str, broadcast) -> None:
             for nb in _neighbors4((r, c)):
                 if nb in fire["expanded_to"]:
                     continue
+
+                # Wenn schon normal geschossen: visuell nichts mehr -> "verbrauchen"
                 if nb in target_board["shots"]:
                     fire["expanded_to"].add(nb)
                     continue
+
                 candidates.add(nb)
 
-        # bis zu 3 neue Zellen pro Tick
         cand_list = list(candidates)
         random.shuffle(cand_list)
         spread_targets = cand_list[:3]
 
         new_burning = set()
-        any_destroyed_cells = []
 
         for cell in spread_targets:
             fire["expanded_to"].add(cell)
             new_burning.add(cell)
 
-            res = _apply_shot_to_board(target_board, cell)
+            res = _apply_napalm_shot_rules(target_board, cell)
             if not res["ok"]:
                 continue
-
-            destroyed_cells = res["destroyed_cells"]
-            if destroyed_cells:
-                any_destroyed_cells.extend(destroyed_cells)
 
             tick_results.append({
                 "target_role": target_role,
@@ -77,25 +67,25 @@ async def _tick_all_fires(room, code: str, broadcast) -> None:
                 "col": cell[1],
                 "hit": bool(res["hit"]),
                 "destroyed": bool(res["destroyed"]),
-                "destroyed_cells": destroyed_cells,
+                "destroyed_cells": res.get("destroyed_cells", []),
+                "napalm_only": bool(res.get("napalm_only", False)),
             })
 
         fire["burning_cells"] |= new_burning
         fire["turns_left"] -= 1
 
         if _all_ships_destroyed(target_board):
-            # Das Feuer hat das Spiel beendet -> Gewinner ist der ANDERE als target_role
             game_over_winner = _other_role(target_role)
 
-    # Feuer entfernen, die fertig sind
-    room.fires = [f for f in room.fires if f["turns_left"] > 0]  # type: ignore[attr-defined]
+    # fertige Feuer entfernen
+    room.fires = [f for f in room.fires if f.get("turns_left", 0) > 0]  # type: ignore[attr-defined]
 
     if tick_results:
-        await broadcast(code, {
+        await broadcast({
             "type": "fire_tick",
             "results": tick_results,
         })
 
     if game_over_winner:
         room.phase = "finished"
-        await broadcast(code, {"type": "game_over", "winner": game_over_winner})
+        await broadcast({"type": "game_over", "winner": game_over_winner})

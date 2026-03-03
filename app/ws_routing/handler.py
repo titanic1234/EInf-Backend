@@ -1,19 +1,18 @@
+# app/ws_routing/ws_handler.py
+
 from collections import defaultdict
 from fastapi import WebSocket, WebSocketDisconnect
 
 from app.store import games, get_player_role
-
 from app.ws_routing.state import _ensure_room_mp_state
-from app.ws_routing.protocol import _handle_message, _send_presence
+from app.ws_routing.protocol import Protocol
 
 connections: dict[str, dict[str, WebSocket]] = defaultdict(dict)
-
 
 
 async def broadcast(code: str, message: dict):
     for ws in connections[code].values():
         await ws.send_json(message)
-
 
 
 async def handle_websocket(websocket: WebSocket, code: str, token: str):
@@ -32,21 +31,21 @@ async def handle_websocket(websocket: WebSocket, code: str, token: str):
     await websocket.accept()
     connections[code][role] = websocket
 
-    # Presence broadcast (unverändert)
-    await _send_presence(room, code, connections, broadcast)
+    proto = Protocol(
+        room=room,
+        code=code,
+        role=role,
+        send=websocket.send_json,
+        broadcast=lambda msg: broadcast(code, msg),
+    )
+
+    # presence raus
+    await proto.send_presence(connections[code])
 
     try:
         while True:
             data = await websocket.receive_json()
-            await _handle_message(
-                room=room,
-                code=code,
-                role=role,
-                data=data,
-                broadcast=broadcast,
-                websocket_send_json=websocket.send_json,
-                connections=connections,
-            )
+            await proto.handle_message(data)
 
     except WebSocketDisconnect:
         connections[code].pop(role, None)

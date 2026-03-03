@@ -1,6 +1,6 @@
 from fastapi import FastAPI, WebSocket
 from app.routers.games import router as games_router
-from app.ws import handle_websocket
+from app.ws_routing.handler import handle_websocket
 
 app = FastAPI(title="Schiffe Versenken Backend")
 
@@ -13,5 +13,6 @@ def root():
 
 
 @app.websocket("/ws/{code}")
-async def websocket_endpoint(websocket: WebSocket, code: str, token: str):
+async def websocket_endpoint(websocket: WebSocket, code: str):
+    token = websocket.query_params.get("token")
     await handle_websocket(websocket, code, token)

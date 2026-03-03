@@ -1,6 +1,5 @@
 from fastapi import APIRouter, HTTPException
 from app.schemas import (
-    CreateGameRequest,
     JoinGameRequest,
     GameCreatedResponse,
     JoinGameResponse,
@@ -14,6 +13,8 @@ router = APIRouter()
 @router.post("/games", response_model=GameCreatedResponse)
 def create_game():
     room, token = create_room()
+    print(room)
+    print(token)
     return GameCreatedResponse(
         code=room.code,
         player_token=token,
@@ -42,24 +43,3 @@ def join_game(payload: JoinGameRequest):
         player_token=token,
         role="guest",
     )
-
-
-@router.get("/games/{code}")
-def get_game(code: str):
-    room = games.get(code)
-    if not room:
-        raise HTTPException(status_code=404, detail="Game not found")
-
-    return {
-        "code": room.code,
-        "phase": room.phase,
-        "has_guest": room.guest is not None,
-        "turn": room.turn,
-        "winner": room.winner,
-    }
-
-
-
-@router.get("/games/list")
-def list_games():
-    return games

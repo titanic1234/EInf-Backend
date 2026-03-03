@@ -1,9 +1,6 @@
 from pydantic import BaseModel
 
 
-class CreateGameRequest(BaseModel):
-    name: str
-
 
 class JoinGameRequest(BaseModel):
     name: str

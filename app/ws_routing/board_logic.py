@@ -1,5 +1,10 @@
 # app/ws_routing/board_logic.py
 
+
+# Logic für abilities mit KI aus Singleplayer angepasst
+
+
+
 from __future__ import annotations
 
 from typing import Any

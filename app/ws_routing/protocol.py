@@ -201,7 +201,7 @@ class Protocol:
                 if (r, c) in target_board["occupied"] and (r, c) not in target_board["shots"]:
                     found.append([r, c])
 
-            await self.send({
+            await self.broadcast({
                 "type": "sonar_result",
                 "by": self.role,
                 "cells": [[r, c] for (r, c) in targets],
@@ -231,7 +231,7 @@ class Protocol:
                 "turns_left": 3,
                 "burning_cells": {(nr, nc)},
                 "expanded_to": {(nr, nc)},
-            })  # type: ignore[attr-defined]
+            })
 
             self.room.turn = _other_role(self.role)
 

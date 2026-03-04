@@ -3,6 +3,7 @@ from app.schemas import (
     JoinGameRequest,
     GameCreatedResponse,
     JoinGameResponse,
+    CreateGameRequest,
 )
 from app.store import create_room, games, generate_token
 from app.models import PlayerState
@@ -11,8 +12,8 @@ router = APIRouter()
 
 
 @router.post("/games", response_model=GameCreatedResponse)
-def create_game():
-    room, token = create_room()
+def create_game(payload: CreateGameRequest):
+    room, token = create_room(theme=payload.theme)
     return GameCreatedResponse(
         code=room.code,
         player_token=token,
@@ -40,4 +41,5 @@ def join_game(payload: JoinGameRequest):
         code=room.code,
         player_token=token,
         role="guest",
+        theme=room.theme
     )

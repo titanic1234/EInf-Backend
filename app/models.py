@@ -17,6 +17,7 @@ class PlayerState:
 @dataclass
 class GameRoom:
     code: str
+    theme: str
     host: PlayerState
     guest: Optional[PlayerState] = None
     phase: str = "waiting"   # waiting, setup, playing, finished

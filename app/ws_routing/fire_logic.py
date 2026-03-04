@@ -1,5 +1,11 @@
 # app/ws_routing/fire_logic.py
 
+
+
+# Logic mit KI aus battle.py für Server anpassen lassen
+
+
+
 import random
 
 from app.ws_routing.state import _in_bounds, _other_role
@@ -52,7 +58,6 @@ async def _tick_all_fires(room, code: str, broadcast) -> None:
                 if nb in target_board["shots"]:
                     fire["expanded_to"].add(nb)
                     continue
-
                 candidates.add(nb)
 
         if not candidates:

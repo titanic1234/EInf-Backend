@@ -1,35 +1,43 @@
 # app/ws_routing/board_logic.py
 
 from __future__ import annotations
-from typing import Any, Dict, List, Set, Tuple, Optional
-from app.ws_routing.types import Coord
+
+from typing import Any
+
 from app.ws_routing.state import _in_bounds
 
-
+# Basenames, die Napalm NICHT beschädigen darf
 IMMUNE_TO_NAPALM_NAMES = {"U-Boot"}
 
 
-def _base_ship_name(name: Optional[str]) -> Optional[str]:
+def _base_ship_name(name: str | None) -> str | None:
     if not isinstance(name, str):
         return None
-    n = name.strip()
-    if not n:
+    name = name.strip()
+    if not name:
         return None
-    return n.split(" #", 1)[0].strip()
+    return name.split(" #", 1)[0].strip()
 
 
-def _parse_ships(data: Dict[str, Any]) -> Tuple[List[Set[Coord]], List[Dict[str, Any]]]:
+def _parse_ships(data: dict) -> tuple[list[set[tuple[int, int]]], list[dict[str, Any]]]:
+    """
+    Akzeptiert:
+      ships = [
+        [[row,col], ...],                           # legacy
+        {"name":"U-Boot", "cells":[[r,c],...]}       # optional meta
+        {"cells":[...], "immune_to_napalm": True}
+      ]
+    """
     ships_raw = data.get("ships")
     if not isinstance(ships_raw, list):
         raise ValueError("ships must be a list")
 
-    ships: List[Set[Coord]] = []
-    meta: List[Dict[str, Any]] = []
+    ships: list[set[tuple[int, int]]] = []
+    meta: list[dict[str, Any]] = []
 
     for ship_raw in ships_raw:
-        ship_name: Optional[str] = None
-        immune_override: Optional[bool] = None
-        cells_raw = None
+        ship_name = None
+        immune_override = None
 
         if isinstance(ship_raw, dict):
             ship_name = ship_raw.get("name")
@@ -39,10 +47,10 @@ def _parse_ships(data: Dict[str, Any]) -> Tuple[List[Set[Coord]], List[Dict[str,
         else:
             cells_raw = ship_raw
 
-        if not isinstance(cells_raw, list) or len(cells_raw) == 0:
+        if not isinstance(cells_raw, list) or not cells_raw:
             raise ValueError("each ship must be a non-empty list of coordinates (or dict with cells)")
 
-        ship_cells: Set[Coord] = set()
+        ship_cells: set[tuple[int, int]] = set()
         for cell in cells_raw:
             if (
                 not isinstance(cell, (list, tuple))
@@ -51,16 +59,18 @@ def _parse_ships(data: Dict[str, Any]) -> Tuple[List[Set[Coord]], List[Dict[str,
                 or not isinstance(cell[1], int)
             ):
                 raise ValueError("each cell must be [row, col] ints")
+
             r, c = int(cell[0]), int(cell[1])
             if not _in_bounds((r, c)):
                 raise ValueError("cell out of bounds")
+
             ship_cells.add((r, c))
 
         ships.append(ship_cells)
 
         base_name = _base_ship_name(ship_name)
-
-        immune = immune_override if immune_override is not None else bool(base_name in IMMUNE_TO_NAPALM_NAMES)
+        immune_default = bool(base_name in IMMUNE_TO_NAPALM_NAMES)
+        immune = immune_default if immune_override is None else bool(immune_override)
 
         meta.append({
             "name": base_name,
@@ -70,13 +80,13 @@ def _parse_ships(data: Dict[str, Any]) -> Tuple[List[Set[Coord]], List[Dict[str,
     return ships, meta
 
 
-def _board_from_ships(ships: List[Set[Coord]], ships_meta: List[Dict[str, Any]]) -> Dict[str, Any]:
-    occupied: Set[Coord] = set()
-    ship_by_cell: Dict[Coord, int] = {}
+def _board_from_ships(ships: list[set[tuple[int, int]]], ships_meta: list[dict[str, Any]]) -> dict[str, Any]:
+    occupied: set[tuple[int, int]] = set()
+    ship_by_cell: dict[tuple[int, int], int] = {}
 
-    for idx, s in enumerate(ships):
-        occupied |= s
-        for cell in s:
+    for idx, ship in enumerate(ships):
+        occupied |= ship
+        for cell in ship:
             ship_by_cell[cell] = idx
 
     return {
@@ -85,50 +95,50 @@ def _board_from_ships(ships: List[Set[Coord]], ships_meta: List[Dict[str, Any]])
         "ship_by_cell": ship_by_cell,
         "occupied": occupied,
         "hits": set(),
-        "shots": set(),
+        "shots": set(),          # normale Shots (blocken nochmal schießen)
         "destroyed_ships": set(),
-        "napalm": set(),
+        "napalm": set(),         # napalm-only marks
     }
 
 
-def _check_destroyed(board: Dict[str, Any], hit_cell: Coord) -> Tuple[bool, List[List[int]]]:
-    ships: List[Set[Coord]] = board["ships"]
-    hits: Set[Coord] = board["hits"]
+def _check_destroyed(board: dict[str, Any], hit_cell: tuple[int, int]) -> tuple[bool, list[list[int]]]:
+    ships: list[set[tuple[int, int]]] = board["ships"]
+    hits: set[tuple[int, int]] = board["hits"]
 
     for idx, ship in enumerate(ships):
-        if hit_cell in ship:
-            if ship.issubset(hits):
-                board["destroyed_ships"].add(idx)
-                destroyed_cells = [[r, c] for (r, c) in ship]
-                return True, destroyed_cells
-            break
+        if hit_cell not in ship:
+            continue
+        if ship.issubset(hits):
+            board["destroyed_ships"].add(idx)
+            return True, [[r, c] for (r, c) in ship]
+        return False, []
+
     return False, []
 
 
-def _all_ships_destroyed(board: Dict[str, Any]) -> bool:
-    ships: List[Set[Coord]] = board["ships"]
-    destroyed: Set[int] = board["destroyed_ships"]
-    return len(ships) > 0 and len(destroyed) == len(ships)
+def _all_ships_destroyed(board: dict[str, Any]) -> bool:
+    ships: list[set[tuple[int, int]]] = board["ships"]
+    destroyed: set[int] = board["destroyed_ships"]
+    return 0 < len(ships) == len(destroyed)
 
 
-def _apply_shot_to_board(target_board: Dict[str, Any], cell: Coord) -> Dict[str, Any]:
+def _apply_shot_to_board(board: dict[str, Any], cell: tuple[int, int]) -> dict[str, Any]:
     if not _in_bounds(cell):
         return {"ok": False, "error": "Out of bounds"}
 
-    if cell in target_board["shots"]:
+    if cell in board["shots"]:
         return {"ok": False, "error": "Cell already shot"}
 
-    target_board["shots"].add(cell)
-    # Normal shot löscht Napalm-Markierung wie im Client
-    target_board["napalm"].discard(cell)
+    board["shots"].add(cell)
+    board["napalm"].discard(cell)  # normal shot entfernt napalm mark
 
-    hit = cell in target_board["occupied"]
+    hit = cell in board["occupied"]
     destroyed = False
-    destroyed_cells: List[List[int]] = []
+    destroyed_cells: list[list[int]] = []
 
     if hit:
-        target_board["hits"].add(cell)
-        destroyed, destroyed_cells = _check_destroyed(target_board, cell)
+        board["hits"].add(cell)
+        destroyed, destroyed_cells = _check_destroyed(board, cell)
 
     return {
         "ok": True,
@@ -139,29 +149,31 @@ def _apply_shot_to_board(target_board: Dict[str, Any], cell: Coord) -> Dict[str,
     }
 
 
-def _ship_idx_for_cell(target_board: Dict[str, Any], cell: Coord) -> Optional[int]:
-    ship_by_cell: Dict[Coord, int] = target_board.get("ship_by_cell", {})
-    return ship_by_cell.get(cell)
+def _ship_idx_for_cell(board: dict[str, Any], cell: tuple[int, int]) -> int | None:
+    return board.get("ship_by_cell", {}).get(cell)
 
 
-def _is_napalm_immune_cell(target_board: Dict[str, Any], cell: Coord) -> bool:
-    idx = _ship_idx_for_cell(target_board, cell)
+def _is_napalm_immune_cell(board: dict[str, Any], cell: tuple[int, int]) -> bool:
+    idx = _ship_idx_for_cell(board, cell)
     if idx is None:
         return False
-    meta: List[Dict[str, Any]] = target_board.get("ships_meta", [])
-    if 0 <= idx < len(meta):
-        return bool(meta[idx].get("immune_to_napalm", False))
-    return False
+
+    meta = board.get("ships_meta", [])
+    if not (0 <= idx < len(meta)):
+        return False
+
+    return bool(meta[idx].get("immune_to_napalm", False))
 
 
-def _apply_napalm_mark(target_board: Dict[str, Any], cell: Coord) -> Dict[str, Any]:
+def _apply_napalm_mark(board: dict[str, Any], cell: tuple[int, int]) -> dict[str, Any]:
     if not _in_bounds(cell):
         return {"ok": False, "error": "Out of bounds"}
 
-    if cell in target_board["shots"]:
+    if cell in board["shots"]:
         return {"ok": False, "error": "Cell already shot"}
 
-    target_board["napalm"].add(cell)
+    board["napalm"].add(cell)
+
     return {
         "ok": True,
         "hit": False,
@@ -171,19 +183,23 @@ def _apply_napalm_mark(target_board: Dict[str, Any], cell: Coord) -> Dict[str, A
     }
 
 
-def _apply_napalm_shot_rules(target_board: Dict[str, Any], cell: Coord) -> Dict[str, Any]:
+def _apply_napalm_shot_rules(board: dict[str, Any], cell: tuple[int, int]) -> dict[str, Any]:
+    """
+    Napalm-Regeln wie im Singleplayer:
+    - Wasser => napalm_only (Marker)
+    - U-Boot => napalm_only (Marker)
+    - sonst => normaler Shot
+    """
     if not _in_bounds(cell):
         return {"ok": False, "error": "Out of bounds"}
 
-    if cell in target_board["shots"]:
+    if cell in board["shots"]:
         return {"ok": False, "error": "Cell already shot"}
 
-    has_ship = cell in target_board["occupied"]
-    if not has_ship:
-        return _apply_napalm_mark(target_board, cell)
+    if cell not in board["occupied"]:
+        return _apply_napalm_mark(board, cell)
 
-    # ✅ HIER ist der wichtige Teil:
-    if _is_napalm_immune_cell(target_board, cell):
-        return _apply_napalm_mark(target_board, cell)
+    if _is_napalm_immune_cell(board, cell):
+        return _apply_napalm_mark(board, cell)
 
-    return _apply_shot_to_board(target_board, cell)
+    return _apply_shot_to_board(board, cell)

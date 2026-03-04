@@ -39,7 +39,7 @@ async def handle_websocket(websocket: WebSocket, code: str, token: str):
         broadcast=lambda msg: broadcast(code, msg),
     )
 
-    # presence raus
+
     await proto.send_presence(connections[code])
 
     try:

@@ -1,5 +1,8 @@
 # app/ws_routing/ability_logic.py
 
+#Ability Logic mit KI aus Singleplayer übertragen
+
+
 from typing import List
 from app.ws_routing.types import Coord
 from app.ws_routing.state import _in_bounds

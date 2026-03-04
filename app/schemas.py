@@ -1,5 +1,7 @@
 from pydantic import BaseModel
 
+#pydantic Vorschlag von KI
+
 
 class CreateGameRequest(BaseModel):
     theme: str
@@ -8,7 +10,6 @@ class CreateGameRequest(BaseModel):
 class JoinGameRequest(BaseModel):
     name: str
     code: str
-
 
 
 class GameCreatedResponse(BaseModel):

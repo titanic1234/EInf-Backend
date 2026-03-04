@@ -2,7 +2,7 @@
 
 
 
-# Logic mit KI aus battle.py für Server anpassen lassen
+# Logic mit KI aus Singleplayer für Server anpassen lassen
 
 
 

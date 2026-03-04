@@ -14,6 +14,7 @@ from app.ws_routing.board_logic import (
 )
 from app.ws_routing.fire_logic import _tick_all_fires
 from app.ws_routing.state import _in_bounds
+from app.lighthouse.gamestate_visualization import build_gamestate_frame
 
 
 SendFn = Callable[[Dict[str, Any]], Awaitable[None]]
@@ -31,6 +32,10 @@ class Protocol:
         self.role = role
         self.send = send
         self.broadcast = broadcast
+
+    async def _broadcast_gamestate_visual(self) -> None:
+        frame = build_gamestate_frame(self.room)
+        await self.broadcast({"type": "gamestate_visual", "pixels": frame})
 
     async def send_presence(self, connections_for_code: Dict[str, Any]) -> None:
         await self.broadcast({
@@ -65,7 +70,6 @@ class Protocol:
             case _:
                 await self.send({"type": "error", "detail": f"Unknown message type: {msg_type}"})
 
-
     async def _handle_set_board(self, data: Dict[str, Any]) -> None:
         try:
             ships, meta = _parse_ships(data)
@@ -80,7 +84,7 @@ class Protocol:
             "host_board_set": bool(self.room.boards.get("host")),   # type: ignore[attr-defined]
             "guest_board_set": bool(self.room.boards.get("guest")), # type: ignore[attr-defined]
         })
-
+        await self._broadcast_gamestate_visual()
 
     async def _handle_ready(self) -> None:
         if self.role == "host":
@@ -144,10 +148,11 @@ class Protocol:
             "x": x,
             "y": y,
             "hit": hit,
-            "destroyed": destroyed,
-            "destroyed_cells": destroyed_cells,
+            "destroyed": bool(res["destroyed"]),
+            "destroyed_cells": res["destroyed_cells"],
             "next_turn": self.room.turn,
         })
+        await self._broadcast_gamestate_visual()
 
         if _all_ships_destroyed(target_board):
             self.room.phase = "finished"
@@ -155,6 +160,7 @@ class Protocol:
             return
 
         await _tick_all_fires(self.room, self.code, self.broadcast)
+        await self._broadcast_gamestate_visual()
 
 
     async def _handle_ability(self, data: Dict[str, Any]) -> None:
@@ -196,9 +202,13 @@ class Protocol:
 
         # sonar: scan only
         if ability == "sonar":
+            target_board.setdefault("scans", set())
+            target_board.setdefault("scan_hits", set())
             found = []
             for (r, c) in targets:
+                target_board["scans"].add((r, c))
                 if (r, c) in target_board["occupied"] and (r, c) not in target_board["shots"]:
+                    target_board["scan_hits"].add((r, c))
                     found.append([r, c])
 
             await self.send({
@@ -211,6 +221,7 @@ class Protocol:
             self.room.turn = _other_role(self.role)
             await self.broadcast({"type": "turn_update", "turn": self.room.turn})
             await _tick_all_fires(self.room, self.code, self.broadcast)
+            await self._broadcast_gamestate_visual()
             return
 
         # napalm: singleplayer rules + fire state
@@ -258,6 +269,7 @@ class Protocol:
                 return
 
             await _tick_all_fires(self.room, self.code, self.broadcast)
+            await self._broadcast_gamestate_visual()
             return
 
         # airstrike: multiple normal shots
@@ -305,3 +317,4 @@ class Protocol:
             return
 
         await _tick_all_fires(self.room, self.code, self.broadcast)
+        await self._broadcast_gamestate_visual()

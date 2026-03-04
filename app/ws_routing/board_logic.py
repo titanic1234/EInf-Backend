@@ -97,7 +97,9 @@ def _board_from_ships(ships: list[set[tuple[int, int]]], ships_meta: list[dict[s
         "hits": set(),
         "shots": set(),          # normale Shots (blocken nochmal schießen)
         "destroyed_ships": set(),
-        "napalm": set(),         # napalm-only marks
+        "napalm": set(), # napalm-only marks
+        "scans": set(),  # sonar scans
+        "scan_hits": set(),  # sonar scans mit Schiff (nicht geschossen)
     }
 
 

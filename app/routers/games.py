@@ -1,3 +1,7 @@
+# games.py
+
+"""Routing für create / join game"""
+
 from fastapi import APIRouter, HTTPException
 from app.schemas import (
     JoinGameRequest,

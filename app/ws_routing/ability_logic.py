@@ -1,6 +1,6 @@
 # app/ws_routing/ability_logic.py
 
-#Ability Logic mit KI aus Singleplayer übertragen
+"""Berechnet die Felder für abilities"""
 
 
 from typing import List

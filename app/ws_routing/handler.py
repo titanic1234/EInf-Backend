@@ -1,5 +1,11 @@
 # app/ws_routing/ws_handler.py
 
+"""
+WebSocket Handler
+
+Nimmt incomming messages an und sendet outcomming messages als broadcast
+"""
+
 from collections import defaultdict
 from fastapi import WebSocket, WebSocketDisconnect
 

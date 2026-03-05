@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 from typing import Any, Awaitable, Callable, Dict, List
+import random
 
 from app.ws_routing.state import _other_role
 from app.ws_routing.ability_logic import _ability_targets
@@ -22,7 +23,7 @@ BroadcastFn = Callable[[Dict[str, Any]], Awaitable[None]]
 
 class Protocol:
     """
-    Enthält die gesamte WS-Game-Logik. WS-Handler ruft nur handle_message().
+    Enthält die gesamte WS-Game-Logik
     """
 
     def __init__(self, room, code: str, role: str, send: SendFn, broadcast: BroadcastFn):
@@ -32,6 +33,8 @@ class Protocol:
         self.send = send
         self.broadcast = broadcast
 
+
+    """Sendet einmal eine presence-Nachricht als Broadcast, wenn der Host oder Gast joined."""
     async def send_presence(self, connections_for_code: Dict[str, Any]) -> None:
         await self.broadcast({
             "type": "presence",
@@ -43,6 +46,7 @@ class Protocol:
             "guest_board_set": bool(getattr(self.room, "boards", {}).get("guest")),
         })
 
+    """Verarbeitet die incomming messages"""
     async def handle_message(self, data: Dict[str, Any]) -> None:
         msg_type = data.get("type")
 
@@ -65,7 +69,7 @@ class Protocol:
             case _:
                 await self.send({"type": "error", "detail": f"Unknown message type: {msg_type}"})
 
-
+    """Verarbeitet das Board, welche im placement durch den Bereit Button gesendet wird"""
     async def _handle_set_board(self, data: Dict[str, Any]) -> None:
         try:
             ships, meta = _parse_ships(data)
@@ -81,7 +85,7 @@ class Protocol:
             "guest_board_set": bool(self.room.boards.get("guest")), # type: ignore[attr-defined]
         })
 
-
+    """Verarbeitet ob beide Player ready sind"""
     async def _handle_ready(self) -> None:
         if self.role == "host":
             self.room.host.ready = True
@@ -103,7 +107,7 @@ class Protocol:
             self.room.phase = "playing"
             await self.broadcast({"type": "game_started", "turn": self.room.turn})
 
-
+    """Verarbeitet ein Shot"""
     async def _handle_shot(self, data: Dict[str, Any]) -> None:
         if self.room.phase != "playing":
             await self.send({"type": "error", "detail": "Game not running"})
@@ -156,7 +160,7 @@ class Protocol:
 
         await _tick_all_fires(self.room, self.code, self.broadcast)
 
-
+    """Verarbeitet eine Abilitie (airstrike, sonar, napalm, guided)"""
     async def _handle_ability(self, data: Dict[str, Any]) -> None:
         if self.room.phase != "playing":
             await self.send({"type": "error", "detail": "Game not running"})
@@ -172,7 +176,7 @@ class Protocol:
             return
 
         target_role = _other_role(self.role)
-        target_board = self.room.boards.get(target_role)  # type: ignore[attr-defined]
+        target_board = self.room.boards.get(target_role)
         if not target_board:
             await self.send({"type": "error", "detail": "Opponent board not set yet"})
             return
@@ -183,8 +187,6 @@ class Protocol:
             if not candidates:
                 await self.send({"type": "error", "detail": "No valid guided target"})
                 return
-            # random wie früher (du hattest erst candidates[0])
-            import random
             targets = [random.choice(candidates)]
         else:
             x = data.get("x")

@@ -1,3 +1,5 @@
+# types.py
+
 from typing import Tuple
 
 GRID_SIZE = 12

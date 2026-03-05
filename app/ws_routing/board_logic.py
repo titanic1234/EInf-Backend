@@ -1,20 +1,16 @@
 # app/ws_routing/board_logic.py
 
 
-# Logic für abilities mit KI aus Singleplayer angepasst
-
-
 
 from __future__ import annotations
-
 from typing import Any
-
 from app.ws_routing.state import _in_bounds
+
 
 # Basenames, die Napalm NICHT beschädigen darf
 IMMUNE_TO_NAPALM_NAMES = {"U-Boot"}
 
-
+"""Returned den reinen Schiffsname"""
 def _base_ship_name(name: str | None) -> str | None:
     if not isinstance(name, str):
         return None
@@ -23,7 +19,7 @@ def _base_ship_name(name: str | None) -> str | None:
         return None
     return name.split(" #", 1)[0].strip()
 
-
+"""Verarbeitet Position, Name und Besonderheiten der Schiffe"""
 def _parse_ships(data: dict) -> tuple[list[set[tuple[int, int]]], list[dict[str, Any]]]:
     """
     Akzeptiert:
@@ -84,7 +80,7 @@ def _parse_ships(data: dict) -> tuple[list[set[tuple[int, int]]], list[dict[str,
 
     return ships, meta
 
-
+"""Returned ein Board anhand der Schiffe"""
 def _board_from_ships(ships: list[set[tuple[int, int]]], ships_meta: list[dict[str, Any]]) -> dict[str, Any]:
     occupied: set[tuple[int, int]] = set()
     ship_by_cell: dict[tuple[int, int], int] = {}
@@ -105,7 +101,7 @@ def _board_from_ships(ships: list[set[tuple[int, int]]], ships_meta: list[dict[s
         "napalm": set(),         # napalm-only marks
     }
 
-
+"""Überprüft ob ein Schiff vollständig zerstört wurde"""
 def _check_destroyed(board: dict[str, Any], hit_cell: tuple[int, int]) -> tuple[bool, list[list[int]]]:
     ships: list[set[tuple[int, int]]] = board["ships"]
     hits: set[tuple[int, int]] = board["hits"]
@@ -120,13 +116,13 @@ def _check_destroyed(board: dict[str, Any], hit_cell: tuple[int, int]) -> tuple[
 
     return False, []
 
-
+"""Überprüft ob alle Schiffe zerstört wurden"""
 def _all_ships_destroyed(board: dict[str, Any]) -> bool:
     ships: list[set[tuple[int, int]]] = board["ships"]
     destroyed: set[int] = board["destroyed_ships"]
     return 0 < len(ships) == len(destroyed)
 
-
+"""Führt einen Schuss auf das Board aus"""
 def _apply_shot_to_board(board: dict[str, Any], cell: tuple[int, int]) -> dict[str, Any]:
     if not _in_bounds(cell):
         return {"ok": False, "error": "Out of bounds"}
@@ -153,11 +149,12 @@ def _apply_shot_to_board(board: dict[str, Any], cell: tuple[int, int]) -> dict[s
         "napalm_only": False,
     }
 
-
+"""Returned ein Schiff anhand der Zelle"""
 def _ship_idx_for_cell(board: dict[str, Any], cell: tuple[int, int]) -> int | None:
     return board.get("ship_by_cell", {}).get(cell)
 
 
+"""Überprüft ob ein Schiff immun gegen Napalm ist (UBoot)"""
 def _is_napalm_immune_cell(board: dict[str, Any], cell: tuple[int, int]) -> bool:
     idx = _ship_idx_for_cell(board, cell)
     if idx is None:
@@ -170,6 +167,7 @@ def _is_napalm_immune_cell(board: dict[str, Any], cell: tuple[int, int]) -> bool
     return bool(meta[idx].get("immune_to_napalm", False))
 
 
+"""Fügt ein Napalm-Marker zu einem Zellen hinzu"""
 def _apply_napalm_mark(board: dict[str, Any], cell: tuple[int, int]) -> dict[str, Any]:
     if not _in_bounds(cell):
         return {"ok": False, "error": "Out of bounds"}
@@ -187,7 +185,7 @@ def _apply_napalm_mark(board: dict[str, Any], cell: tuple[int, int]) -> dict[str
         "napalm_only": True,
     }
 
-
+"""Überprüft ob napalm in der Zelle erlaubt ist"""
 def _apply_napalm_shot_rules(board: dict[str, Any], cell: tuple[int, int]) -> dict[str, Any]:
     """
     Napalm-Regeln wie im Singleplayer:

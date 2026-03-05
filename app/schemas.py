@@ -1,3 +1,5 @@
+# schemas.py
+
 from pydantic import BaseModel
 
 #pydantic Vorschlag von KI

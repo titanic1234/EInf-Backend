@@ -21,14 +21,6 @@ def _base_ship_name(name: str | None) -> str | None:
 
 """Verarbeitet Position, Name und Besonderheiten der Schiffe"""
 def _parse_ships(data: dict) -> tuple[list[set[tuple[int, int]]], list[dict[str, Any]]]:
-    """
-    Akzeptiert:
-      ships = [
-        [[row,col], ...],                           # legacy
-        {"name":"U-Boot", "cells":[[r,c],...]}       # optional meta
-        {"cells":[...], "immune_to_napalm": True}
-      ]
-    """
     ships_raw = data.get("ships")
     if not isinstance(ships_raw, list):
         raise ValueError("ships must be a list")
